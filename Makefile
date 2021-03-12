@@ -128,7 +128,7 @@ local:
 
 build-images: build
 	@docker build -t ${IMAGE_NAME_AND_VERSION} -f build/Dockerfile .
-	@docker tag ${IMAGE_NAME_AND_VERSION} $(REGISTRY)/$(IMG):latest
+	@docker tag ${IMAGE_NAME_AND_VERSION} $(REGISTRY)/$(IMG):canary
 
 build-latest-community-operator:
 	docker tag ${COMPONENT_DOCKER_REPO}/${COMPONENT_NAME}:${COMPONENT_VERSION}${COMPONENT_TAG_EXTENSION} ${COMPONENT_DOCKER_REPO}/${COMPONENT_NAME}:community-latest

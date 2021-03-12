@@ -17,6 +17,7 @@ package deployable
 import (
 	"context"
 	"reflect"
+	"strings"
 
 	spokeClusterV1 "github.com/open-cluster-management/api/cluster/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +45,10 @@ import (
 * USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
 * business logic.  Delete these comments after modifying this file.*
  */
+
+const (
+	placementRuleFlag = "--fired-by-placementrule"
+)
 
 // Add creates a new Deployable Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
@@ -97,7 +102,7 @@ func (mapper *placementruleMapper) Map(obj handler.MapObject) []reconcile.Reques
 
 		// only reconcile it's own object
 		objkey := types.NamespacedName{
-			Name:      dpl.GetName(),
+			Name:      dpl.GetName() + placementRuleFlag + obj.Meta.GetResourceVersion(),
 			Namespace: dpl.GetNamespace(),
 		}
 
@@ -291,9 +296,55 @@ type ReconcileDeployable struct {
 	eventRecorder *utils.EventRecorder
 }
 
+func after(value string, a string) string {
+	// Get substring after a string.
+	pos := strings.LastIndex(value, a)
+	if pos == -1 {
+		return ""
+	}
+
+	adjustedPos := pos + len(a)
+
+	if adjustedPos >= len(value) {
+		return ""
+	}
+
+	return value[adjustedPos:]
+}
+
+func updatePauseLabel(placementDecisionUpdated bool, instance *appv1alpha1.Deployable) {
+	if !placementDecisionUpdated || !utils.IsRamenDRProtectedDplSub(instance) {
+		return
+	}
+
+	klog.Info("pausing subscription due to ramen label and placement rule change")
+
+	labels := instance.GetLabels()
+
+	if labels[appv1alpha1.LabelSubscriptionPause] != "" &&
+		strings.EqualFold(labels[appv1alpha1.LabelSubscriptionPause], "true") {
+		return
+	}
+
+	klog.Info("updating pause labels")
+	labels[appv1alpha1.LabelSubscriptionPause] = "true"
+	instance.SetLabels(labels)
+}
+
 // Reconcile reads that state of the cluster for a Deployable object and makes changes based on the state read
 // and what is in the Deployable.Spec
 func (r *ReconcileDeployable) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	//HACK! flag used to determine if the reconcile came from a placementrule decision change
+	placementDecisionUpdated := false
+	if strings.Contains(request.Name, placementRuleFlag) {
+		klog.Info("Reconciling: Based on PlacementRule update", request.NamespacedName)
+		placementDecisionUpdated = true
+		placementRuleRv := after(request.Name, placementRuleFlag)
+		request.Name = strings.TrimSuffix(request.Name, placementRuleRv)
+		request.Name = strings.TrimSuffix(request.Name, placementRuleFlag)
+		request.NamespacedName = types.NamespacedName{Name: request.Name, Namespace: request.Namespace}
+	}
+
 	// Fetch the Deployable instance
 	instance := &appv1alpha1.Deployable{}
 	err := r.Get(context.TODO(), request.NamespacedName, instance)
@@ -315,6 +366,8 @@ func (r *ReconcileDeployable) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, err
 	}
 
+	updatePauseLabel(placementDecisionUpdated, instance)
+	klog.Infof("deployable labels (%v), updated by placement (%v)", instance.GetLabels(), placementDecisionUpdated)
 	savedStatus := instance.Status.DeepCopy()
 
 	// try if it is a hub deployable

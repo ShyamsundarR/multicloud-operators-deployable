@@ -462,3 +462,26 @@ func SetPauseLabelDplSubTpl(instance, targetdpl *appv1alpha1.Deployable) error {
 
 	return nil
 }
+
+// IsRamenDRProtectedDplSub determines if a deployable containing a subscription template is ramen DR protected
+func IsRamenDRProtectedDplSub(instance *appv1alpha1.Deployable) bool {
+	targetTpl := &unstructured.Unstructured{}
+
+	err := json.Unmarshal(instance.Spec.Template.Raw, targetTpl)
+	if err != nil {
+		klog.Error("Failed to unmashal target deployable subscription template with error: ", err)
+		return false
+	}
+
+	if targetTpl.GetKind() != "Subscription" {
+		return false
+	}
+
+	if targetTplLabels := targetTpl.GetLabels(); targetTplLabels == nil ||
+		targetTplLabels["ramendr"] == "" ||
+		!strings.EqualFold(targetTplLabels["ramendr"], "protected") {
+		return false
+	}
+
+	return true
+}
